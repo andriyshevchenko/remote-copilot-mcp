@@ -275,22 +275,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
       await telegram.sendMessage(TELEGRAM_CHAT_ID, message, "MarkdownV2");
     } catch (error) {
-      process.stderr.write(
-        `Failed to send progress message via Telegram: ${
-          error instanceof Error ? error.message : String(error)
-        }\n`,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              "Error: Failed to send progress update to Telegram. " +
-              "Please check the Telegram configuration and try again.",
-          },
-        ],
-        isError: true,
-      };
+      const errorMsg =
+        error instanceof Error ? error.message : String(error);
+      // If Telegram rejected the message due to a MarkdownV2 parse error,
+      // retry without parse_mode so the operator still receives the update.
+      const isParseError = errorMsg.includes("can't parse entities");
+      if (isParseError) {
+        try {
+          await telegram.sendMessage(TELEGRAM_CHAT_ID, message);
+        } catch (retryError) {
+          process.stderr.write(
+            `Failed to send progress message via Telegram (plain fallback): ${
+              retryError instanceof Error
+                ? retryError.message
+                : String(retryError)
+            }\n`,
+          );
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  "Error: Failed to send progress update to Telegram even without formatting. " +
+                  "Please check the Telegram configuration and try again.",
+              },
+            ],
+            isError: true,
+          };
+        }
+      } else {
+        process.stderr.write(
+          `Failed to send progress message via Telegram: ${errorMsg}\n`,
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                "Error: Failed to send progress update to Telegram. " +
+                "If the message contains MarkdownV2 special characters (_ * [ ] ( ) ~ ` > # + - = | { } . !) " +
+                "ensure they are escaped with a preceding backslash. " +
+                "Otherwise, check the Telegram configuration and try again.",
+            },
+          ],
+          isError: true,
+        };
+      }
     }
 
     // Collect any messages the operator sent while the agent was working so
@@ -315,7 +345,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     const responseText =
       pendingMessages.length > 0
-        ? `Progress reported successfully. The operator also sent the following message(s) while you were working:\n\n${pendingMessages.join("\n\n")}`
+        ? `Progress reported successfully.\n\n` +
+          `While you were working, the operator sent additional message(s). ` +
+          `Follow the instructions: ${pendingMessages.join("\n\n")}. ` +
+          `Create plan, use subagents. ` +
+          `Use web search for framework/pattern related concerns. ` +
+          `Use report_progress tool to proactively report progress to the user. ` +
+          `After you're done (don't skip this step), call remote_copilot_wait_for_instructions again to keep the feedback loop alive`
         : "Progress reported successfully.";
 
     return {
