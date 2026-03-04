@@ -16,6 +16,7 @@
  *                           (default: 30).
  */
 
+import { createRequire } from "module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -23,6 +24,11 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { TelegramClient } from "./telegram.js";
+
+const _require = createRequire(import.meta.url);
+const { version: PKG_VERSION } = _require("../package.json") as {
+  version: string;
+};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -56,15 +62,34 @@ const telegram = new TelegramClient(TELEGRAM_TOKEN);
  * The next update_id we want to receive.
  * Persisted across tool calls within the same server process so we never
  * re-deliver a message that was already handled.
+ *
+ * Initialised by draining the existing Telegram update backlog on startup
+ * so that old messages are not replayed as instructions.
  */
-let nextUpdateId = 0;
+let nextUpdateId = await (async () => {
+  try {
+    let offset = 0;
+    for (;;) {
+      const updates = await telegram.getUpdates(offset, 0);
+      if (updates.length === 0) break;
+      offset = updates[updates.length - 1].update_id + 1;
+    }
+    return offset;
+  } catch (err) {
+    process.stderr.write(
+      `Warning: Failed to drain Telegram update backlog on startup: ${err instanceof Error ? err.message : String(err)}\n` +
+        "Old messages may be replayed. Continuing with offset 0.\n",
+    );
+    return 0;
+  }
+})();
 
 // ---------------------------------------------------------------------------
 // MCP Server
 // ---------------------------------------------------------------------------
 
 const server = new Server(
-  { name: "remote-copilot-mcp", version: "1.0.0" },
+  { name: "remote-copilot-mcp", version: PKG_VERSION },
   { capabilities: { tools: {} } },
 );
 
@@ -141,10 +166,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           controller.signal,
         );
       } catch (err: unknown) {
-        if (
-          err instanceof Error &&
-          (err.name === "AbortError" || err.message.includes("abort"))
-        ) {
+        if (err instanceof Error && err.name === "AbortError") {
           // Fetch was aborted due to per-request timeout; retry if overall
           // deadline has not yet been reached.
           continue;
@@ -223,7 +245,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    await telegram.sendMessage(TELEGRAM_CHAT_ID, message);
+    try {
+      await telegram.sendMessage(TELEGRAM_CHAT_ID, message);
+    } catch (error) {
+      process.stderr.write(
+        `Failed to send progress message via Telegram: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`,
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "Error: Failed to send progress update to Telegram. " +
+              "Please check the Telegram configuration and try again.",
+          },
+        ],
+        isError: true,
+      };
+    }
 
     return {
       content: [

@@ -42,23 +42,32 @@ export class TelegramClient {
   async getUpdates(
     offset: number,
     timeout: number,
-    signal: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<TelegramUpdate[]> {
     const url = new URL(`${this.baseUrl}/getUpdates`);
     url.searchParams.set("offset", String(offset));
     url.searchParams.set("timeout", String(timeout));
     url.searchParams.set("allowed_updates", JSON.stringify(["message"]));
 
-    const response = await fetch(url.toString(), { signal });
+    const response = await fetch(url.toString(), signal ? { signal } : {});
+    let data: GetUpdatesResult | undefined;
+    try {
+      data = (await response.json()) as GetUpdatesResult;
+    } catch (parseErr) {
+      process.stderr.write(
+        `Failed to parse Telegram getUpdates response: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}\n`,
+      );
+      data = undefined;
+    }
     if (!response.ok) {
+      const description = data?.description ?? response.statusText;
       throw new Error(
-        `Telegram getUpdates failed: ${response.status} ${response.statusText}`,
+        `Telegram getUpdates failed: ${response.status} ${description}`,
       );
     }
-    const data = (await response.json()) as GetUpdatesResult;
-    if (!data.ok) {
+    if (!data || !data.ok) {
       throw new Error(
-        `Telegram API error in getUpdates${data.description ? `: ${data.description}` : ""}`,
+        `Telegram API error in getUpdates${data?.description ? `: ${data.description}` : ""}`,
       );
     }
     return data.result;
