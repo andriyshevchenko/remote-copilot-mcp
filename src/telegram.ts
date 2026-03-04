@@ -104,7 +104,7 @@ export class TelegramClient {
         }`,
       );
     }
-    if (data.ok === false) {
+    if (data.ok !== true) {
       const description = data.description ?? "Unknown Telegram API error";
       throw new Error(`Telegram API error in sendMessage: ${description}`);
     }
