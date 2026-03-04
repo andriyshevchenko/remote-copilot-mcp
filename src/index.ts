@@ -30,9 +30,13 @@ import { TelegramClient } from "./telegram.js";
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ?? "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID ?? "";
+const rawWaitTimeoutMinutes = parseInt(
+  process.env.WAIT_TIMEOUT_MINUTES ?? "",
+  10,
+);
 const WAIT_TIMEOUT_MINUTES = Math.max(
   1,
-  parseInt(process.env.WAIT_TIMEOUT_MINUTES ?? "30", 10),
+  Number.isFinite(rawWaitTimeoutMinutes) ? rawWaitTimeoutMinutes : 30,
 );
 
 if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
@@ -141,9 +145,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           err instanceof Error &&
           (err.name === "AbortError" || err.message.includes("abort"))
         ) {
-          // Fetch was aborted (e.g. deadline approaching); fall through to
-          // timeout handling.
-          break;
+          // Fetch was aborted due to per-request timeout; retry if overall
+          // deadline has not yet been reached.
+          continue;
         }
         throw new Error(
           `Failed to fetch updates from Telegram: ${err instanceof Error ? err.message : String(err)}`,

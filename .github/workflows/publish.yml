@@ -38,12 +38,25 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Validate version input
+        run: |
+          set -e
+          VERSION="${{ github.event.inputs.version }}"
+          if [ "$VERSION" = "patch" ] || [ "$VERSION" = "minor" ] || [ "$VERSION" = "major" ]; then
+            exit 0
+          fi
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            exit 0
+          fi
+          echo "Error: Invalid version input '$VERSION'. Expected 'patch', 'minor', 'major', or a semantic version like '1.2.3'." >&2
+          exit 1
+
       - name: Bump version
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # [skip ci] prevents the CI workflow from re-running on this commit.
-          npm version ${{ github.event.inputs.version }} --message "chore: release v%s [skip ci]"
+          # [skip ci] prevents CI from running on the version-bump commit; CI may still run on the subsequent tag push.
+          npm version '${{ github.event.inputs.version }}' --message "chore: release v%s [skip ci]"
 
       - name: Push version commit and tag
         run: git push --follow-tags

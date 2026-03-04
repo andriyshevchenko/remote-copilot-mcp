@@ -18,6 +18,7 @@ export interface TelegramUpdate {
 export interface GetUpdatesResult {
   ok: boolean;
   result: TelegramUpdate[];
+  description?: string;
 }
 
 export interface SendMessageResult {
@@ -56,7 +57,9 @@ export class TelegramClient {
     }
     const data = (await response.json()) as GetUpdatesResult;
     if (!data.ok) {
-      throw new Error(`Telegram API error in getUpdates`);
+      throw new Error(
+        `Telegram API error in getUpdates${data.description ? `: ${data.description}` : ""}`,
+      );
     }
     return data.result;
   }
@@ -71,13 +74,21 @@ export class TelegramClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text }),
     });
+    let data: SendMessageResult | undefined;
+    try {
+      data = (await response.json()) as SendMessageResult;
+    } catch {
+      data = undefined;
+    }
     if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as {
-        description?: string;
-      };
+      const description = data?.description ?? response.statusText;
       throw new Error(
-        `Telegram sendMessage failed: ${response.status} ${body.description ?? response.statusText}`,
+        `Telegram sendMessage failed: ${response.status} ${description}`,
       );
+    }
+    if (data?.ok === false) {
+      const description = data.description ?? "Unknown Telegram API error";
+      throw new Error(`Telegram API error in sendMessage: ${description}`);
     }
   }
 }

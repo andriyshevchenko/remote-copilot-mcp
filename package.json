@@ -22,7 +22,7 @@
   },
   "keywords": ["mcp", "telegram", "copilot", "ai-assistant"],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "bugs": {
     "url": "https://github.com/andriyshevchenko/remote-copilot-mcp/issues"
